@@ -109,6 +109,7 @@ def train(args):
     train_nodes = torch.LongTensor(train_graph.ndata['id'])
     train_edges = torch.LongTensor(train_graph.edata['type'])
     if use_cuda:
+        train_graph = train_graph.to(device)
         train_nodes = train_nodes.to(device)
         train_edges = train_edges.to(device)
     train_graph.ndata['id'] = train_nodes
@@ -118,6 +119,7 @@ def train(args):
     test_nodes = torch.LongTensor(test_graph.ndata['id'])
     test_edges = torch.LongTensor(test_graph.edata['type'])
     if use_cuda:
+        test_graph = test_graph.to(device)
         test_nodes = test_nodes.to(device)
         test_edges = test_edges.to(device)
     test_graph.ndata['id'] = test_nodes
