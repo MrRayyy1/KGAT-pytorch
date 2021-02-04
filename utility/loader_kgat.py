@@ -24,16 +24,17 @@ class DataLoaderKGAT(object):
         test_file = os.path.join(data_dir, 'test.txt')
         kg_file = os.path.join(data_dir, "kg_final.txt")
 
-        self.cf_train_data, self.train_user_dict = self.load_cf(train_file)
-        self.cf_test_data, self.test_user_dict = self.load_cf(test_file)
+        self.cf_train_data, self.train_user_dict, self.train_user_all_dict = self.load_cf(train_file)
+        self.cf_test_data, self.test_user_dict, self.test_user_all_dict = self.load_cf(test_file)
         self.statistic_cf()
 
         kg_data = self.load_kg(kg_file)
         self.construct_data(kg_data)
 
         self.print_info(logging)
-        self.train_graph = self.create_graph(self.kg_train_data, self.n_users_entities)
-        self.test_graph = self.create_graph(self.kg_test_data, self.n_users_entities)
+        self.kg_graph = self.create_graph(self.kg_data, self.n_entities)
+        #self.train_graph = self.create_graph(self.kg_train_data, self.n_users_entities)
+        #self.test_graph = self.create_graph(self.kg_test_data, self.n_users_entities)
 
         if self.use_pretrain == 1:
             self.load_pretrained_data()
@@ -43,7 +44,8 @@ class DataLoaderKGAT(object):
         user = []
         item = []
         user_dict = dict()
-
+        item_dict = dict()
+        user_all_dict = dict()
         lines = open(filename, 'r').readlines()
         for l in lines:
             tmp = l.strip()
@@ -56,11 +58,32 @@ class DataLoaderKGAT(object):
                 for item_id in item_ids:
                     user.append(user_id)
                     item.append(item_id)
+                    if item_id not in item_dict:
+                        item_dict[item_id] = []
+                    if user_id not in item_dict[item_id]:
+                        item_dict[item_id].append(user_id)
                 user_dict[user_id] = item_ids
 
+        for uid in user_dict.keys():
+            user_sim_user = []
+            item_list = np.random.choice(list(user_dict[uid]), size=6, replace=True)
+            sim_item_list = list()
+            for iid in user_dict[uid]:
+                user_sim_user = np.concatenate((user_sim_user, item_dict[iid]))
+            user_sim_user = list(set(user_sim_user))
+            for sim_user in user_sim_user:
+                for sim_item in user_dict[sim_user]:
+                    if sim_item not in user_dict[uid]:
+                        sim_item_list.append(sim_item)
+            if sim_item_list:
+                sim_item_list = np.random.choice(list(set(sim_item_list)), size=2, replace=True)
+            else:
+                sim_item_list = np.random.choice(list(user_dict[uid]), size=2, replace=True)
+            sampled_item_list = np.concatenate((item_list, sim_item_list))
+            user_all_dict[uid] = sampled_item_list
         user = np.array(user, dtype=np.int32)
         item = np.array(item, dtype=np.int32)
-        return (user, item), user_dict
+        return (user, item), user_dict, user_all_dict
 
 
     def statistic_cf(self):
@@ -85,18 +108,19 @@ class DataLoaderKGAT(object):
         kg_data = pd.concat([kg_data, reverse_kg_data], axis=0, ignore_index=True, sort=False)
 
         # re-map user id
-        kg_data['r'] += 2
+        #kg_data['r'] += 2
         self.n_relations = max(kg_data['r']) + 1
         self.n_entities = max(max(kg_data['h']), max(kg_data['t'])) + 1
         self.n_users_entities = self.n_users + self.n_entities
 
-        self.cf_train_data = (np.array(list(map(lambda d: d + self.n_entities, self.cf_train_data[0]))).astype(np.int32), self.cf_train_data[1].astype(np.int32))
-        self.cf_test_data = (np.array(list(map(lambda d: d + self.n_entities, self.cf_test_data[0]))).astype(np.int32), self.cf_test_data[1].astype(np.int32))
+        #self.cf_train_data = (np.array(list(map(lambda d: d + self.n_entities, self.cf_train_data[0]))).astype(np.int32), self.cf_train_data[1].astype(np.int32))
+        #self.cf_test_data = (np.array(list(map(lambda d: d + self.n_entities, self.cf_test_data[0]))).astype(np.int32), self.cf_test_data[1].astype(np.int32))
 
-        self.train_user_dict = {k + self.n_entities: np.unique(v).astype(np.int32) for k, v in self.train_user_dict.items()}
-        self.test_user_dict = {k + self.n_entities: np.unique(v).astype(np.int32) for k, v in self.test_user_dict.items()}
+        #self.train_user_dict = {k + self.n_entities: np.unique(v).astype(np.int32) for k, v in self.train_user_dict.items()}
+        #self.test_user_dict = {k + self.n_entities: np.unique(v).astype(np.int32) for k, v in self.test_user_dict.items()}
 
         # add interactions to kg data
+        '''
         cf2kg_train_data = pd.DataFrame(np.zeros((self.n_cf_train, 3), dtype=np.int32), columns=['h', 'r', 't'])
         cf2kg_train_data['h'] = self.cf_train_data[0]
         cf2kg_train_data['t'] = self.cf_train_data[1]
@@ -112,27 +136,21 @@ class DataLoaderKGAT(object):
         reverse_cf2kg_test_data = pd.DataFrame(np.ones((self.n_cf_test, 3), dtype=np.int32), columns=['h', 'r', 't'])
         reverse_cf2kg_test_data['h'] = self.cf_test_data[1]
         reverse_cf2kg_test_data['t'] = self.cf_test_data[0]
-
+        
         self.kg_train_data = pd.concat([kg_data, cf2kg_train_data, reverse_cf2kg_train_data], ignore_index=True)
         self.kg_test_data = pd.concat([kg_data, cf2kg_test_data, reverse_cf2kg_test_data], ignore_index=True)
-
-        self.n_kg_train = len(self.kg_train_data)
-        self.n_kg_test = len(self.kg_test_data)
+        '''
+        self.kg_data = kg_data
+        self.n_kg = len(self.kg_data)
 
         # construct kg dict
-        self.train_kg_dict = collections.defaultdict(list)
-        self.train_relation_dict = collections.defaultdict(list)
-        for row in self.kg_train_data.iterrows():
+        self.kg_dict = collections.defaultdict(list)
+        self.relation_dict = collections.defaultdict(list)
+        for row in kg_data.iterrows():
             h, r, t = row[1]
-            self.train_kg_dict[h].append((t, r))
-            self.train_relation_dict[r].append((h, t))
+            self.kg_dict[h].append((t, r))
+            self.relation_dict[r].append((h, t))
 
-        self.test_kg_dict = collections.defaultdict(list)
-        self.test_relation_dict = collections.defaultdict(list)
-        for row in self.kg_test_data.iterrows():
-            h, r, t = row[1]
-            self.test_kg_dict[h].append((t, r))
-            self.test_relation_dict[r].append((h, t))
 
 
     def print_info(self, logging):
@@ -145,8 +163,7 @@ class DataLoaderKGAT(object):
         logging.info('n_cf_train:         %d' % self.n_cf_train)
         logging.info('n_cf_test:          %d' % self.n_cf_test)
 
-        logging.info('n_kg_train:         %d' % self.n_kg_train)
-        logging.info('n_kg_test:          %d' % self.n_kg_test)
+        logging.info('n_kg:               %d' % self.n_kg)
 
 
     def create_graph(self, kg_data, n_nodes):
@@ -234,7 +251,7 @@ class DataLoaderKGAT(object):
             if len(sample_neg_tails) == n_sample_neg_triples:
                 break
 
-            tail = np.random.randint(low=0, high=self.n_users_entities, size=1)[0]
+            tail = np.random.randint(low=0, high=self.n_entities, size=1)[0]
             if (tail, relation) not in pos_triples and tail not in sample_neg_tails:
                 sample_neg_tails.append(tail)
         return sample_neg_tails

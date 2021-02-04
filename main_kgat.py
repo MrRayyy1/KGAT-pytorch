@@ -21,7 +21,7 @@ from utility.helper import *
 from utility.loader_kgat import DataLoaderKGAT
 
 
-def evaluate(model, train_graph, train_user_dict, test_user_dict, user_ids_batches, item_ids, K):
+def evaluate(model, train_graph, train_user_dict,train_user_all_dict, test_user_dict, test_user_all_dict, user_ids_batches, item_ids, K):
     model.eval()
 
     with torch.no_grad():
@@ -38,7 +38,7 @@ def evaluate(model, train_graph, train_user_dict, test_user_dict, user_ids_batch
 
     with torch.no_grad():
         for user_ids_batch in user_ids_batches:
-            cf_scores_batch = model('predict', train_graph, user_ids_batch, item_ids)       # (n_batch_users, n_eval_items)
+            cf_scores_batch = model('predict', train_graph, user_ids_batch, item_ids, test_user_all_dict)       # (n_batch_users, n_eval_items)
 
             cf_scores_batch = cf_scores_batch.cpu()
             user_ids_batch = user_ids_batch.cpu().numpy()
@@ -105,19 +105,21 @@ def train(args):
     optimizer = optim.Adam(model.parameters(), lr=args.lr)
 
     # move graph data to GPU
-    train_graph = data.train_graph
+    train_graph = data.kg_graph
     train_nodes = torch.LongTensor(train_graph.ndata['id'])
     train_edges = torch.LongTensor(train_graph.edata['type'])
     if use_cuda:
+        train_graph = train_graph.to(device)
         train_nodes = train_nodes.to(device)
         train_edges = train_edges.to(device)
     train_graph.ndata['id'] = train_nodes
     train_graph.edata['type'] = train_edges
 
-    test_graph = data.test_graph
+    test_graph = data.kg_graph
     test_nodes = torch.LongTensor(test_graph.ndata['id'])
     test_edges = torch.LongTensor(test_graph.edata['type'])
     if use_cuda:
+        test_graph = test_graph.to(device)
         test_nodes = test_nodes.to(device)
         test_edges = test_edges.to(device)
     test_graph.ndata['id'] = test_nodes
@@ -153,7 +155,7 @@ def train(args):
                 cf_batch_user = cf_batch_user.to(device)
                 cf_batch_pos_item = cf_batch_pos_item.to(device)
                 cf_batch_neg_item = cf_batch_neg_item.to(device)
-            cf_batch_loss = model('calc_cf_loss', train_graph, cf_batch_user, cf_batch_pos_item, cf_batch_neg_item)
+            cf_batch_loss = model('calc_cf_loss', train_graph, cf_batch_user, cf_batch_pos_item, cf_batch_neg_item, data.train_user_all_dict)
 
             cf_batch_loss.backward()
             optimizer.step()
@@ -167,11 +169,11 @@ def train(args):
         # train kg
         time1 = time()
         kg_total_loss = 0
-        n_kg_batch = data.n_kg_train // data.kg_batch_size + 1
+        n_kg_batch = data.n_kg // data.kg_batch_size + 1
 
         for iter in range(1, n_kg_batch + 1):
             time2 = time()
-            kg_batch_head, kg_batch_relation, kg_batch_pos_tail, kg_batch_neg_tail = data.generate_kg_batch(data.train_kg_dict)
+            kg_batch_head, kg_batch_relation, kg_batch_pos_tail, kg_batch_neg_tail = data.generate_kg_batch(data.kg_dict)
             if use_cuda:
                 kg_batch_head = kg_batch_head.to(device)
                 kg_batch_relation = kg_batch_relation.to(device)
@@ -193,7 +195,7 @@ def train(args):
         # evaluate cf
         if (epoch % args.evaluate_every) == 0:
             time1 = time()
-            _, precision, recall, ndcg = evaluate(model, train_graph, data.train_user_dict, data.test_user_dict, user_ids_batches, item_ids, args.K)
+            _, precision, recall, ndcg = evaluate(model, train_graph, data.train_user_dict,data.train_user_all_dict, data.test_user_dict, data.test_user_all_dict, user_ids_batches, item_ids, args.K)
             logging.info('CF Evaluation: Epoch {:04d} | Total Time {:.1f}s | Precision {:.4f} Recall {:.4f} NDCG {:.4f}'.format(epoch, time() - time1, precision, recall, ndcg))
 
             epoch_list.append(epoch)
@@ -256,7 +258,7 @@ def predict(args):
     #     model = nn.parallel.DistributedDataParallel(model)
 
     # move graph data to GPU
-    train_graph = data.train_graph
+    train_graph = data.kg_graph
     train_nodes = torch.LongTensor(train_graph.ndata['id'])
     train_edges = torch.LongTensor(train_graph.edata['type'])
     if use_cuda:
@@ -265,7 +267,7 @@ def predict(args):
     train_graph.ndata['id'] = train_nodes
     train_graph.edata['type'] = train_edges
 
-    test_graph = data.test_graph
+    test_graph = data.kg_graph
     test_nodes = torch.LongTensor(test_graph.ndata['id'])
     test_edges = torch.LongTensor(test_graph.edata['type'])
     if use_cuda:
@@ -275,7 +277,7 @@ def predict(args):
     test_graph.edata['type'] = test_edges
 
     # predict
-    cf_scores, precision, recall, ndcg = evaluate(model, train_graph, data.train_user_dict, data.test_user_dict, user_ids_batches, item_ids, args.K)
+    cf_scores, precision, recall, ndcg = evaluate(model, train_graph, data.train_user_dict, data.train_user_all_dict, data.test_user_dict, data.test_user_all_dict, user_ids_batches, item_ids, args.K)
     np.save(args.save_dir + 'cf_scores.npy', cf_scores)
     print('CF Evaluation: Precision {:.4f} Recall {:.4f} NDCG {:.4f}'.format(precision, recall, ndcg))
 

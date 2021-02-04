@@ -4,6 +4,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from dgl.nn.pytorch.softmax import edge_softmax
 from utility.helper import edge_softmax_fix
+import numpy as np
 
 
 def _L2_loss_mean(x):
@@ -93,12 +94,13 @@ class KGAT(nn.Module):
         self.cf_l2loss_lambda = args.cf_l2loss_lambda
 
         self.relation_embed = nn.Embedding(self.n_relations, self.relation_dim)
-        self.entity_user_embed = nn.Embedding(self.n_entities + self.n_users, self.entity_dim)
+        #self.entity_user_embed = nn.Embedding(self.n_entities + self.n_users, self.entity_dim)
+        self.entity_embed = nn.Embedding(self.n_entities, self.entity_dim)
         if (self.use_pretrain == 1) and (user_pre_embed is not None) and (item_pre_embed is not None):
             other_entity_embed = nn.Parameter(torch.Tensor(self.n_entities - item_pre_embed.shape[0], self.entity_dim))
             nn.init.xavier_uniform_(other_entity_embed, gain=nn.init.calculate_gain('relu'))
-            entity_user_embed = torch.cat([item_pre_embed, other_entity_embed, user_pre_embed], dim=0)
-            self.entity_user_embed.weight = nn.Parameter(entity_user_embed)
+            entity_embed = torch.cat([item_pre_embed, other_entity_embed], dim=0)
+            self.entity_embed.weight = nn.Parameter(entity_embed)
 
         self.W_R = nn.Parameter(torch.Tensor(self.n_relations, self.entity_dim, self.relation_dim))
         nn.init.xavier_uniform_(self.W_R, gain=nn.init.calculate_gain('relu'))
@@ -106,12 +108,20 @@ class KGAT(nn.Module):
         self.aggregator_layers = nn.ModuleList()
         for k in range(self.n_layers):
             self.aggregator_layers.append(Aggregator(self.conv_dim_list[k], self.conv_dim_list[k + 1], self.mess_dropout[k], self.aggregation_type))
-
+        self.encoder = nn.Sequential(
+            nn.Linear(176*8, 176, bias=False),
+            nn.ReLU(),
+            nn.Linear(176, 176, bias = False),
+            nn.ReLU()
+        )
+        for layer in self.encoder:
+            if isinstance(layer, nn.Linear):
+                nn.init.xavier_uniform_(layer.weight)
 
     def att_score(self, edges):
         # Equation (4)
-        r_mul_t = torch.matmul(self.entity_user_embed(edges.src['id']), self.W_r)                       # (n_edge, relation_dim)
-        r_mul_h = torch.matmul(self.entity_user_embed(edges.dst['id']), self.W_r)                       # (n_edge, relation_dim)
+        r_mul_t = torch.matmul(self.entity_embed(edges.src['id']), self.W_r)                       # (n_edge, relation_dim)
+        r_mul_h = torch.matmul(self.entity_embed(edges.dst['id']), self.W_r)                       # (n_edge, relation_dim)
         r_embed = self.relation_embed(edges.data['type'])                                               # (1, relation_dim)
         att = torch.bmm(r_mul_t.unsqueeze(1), torch.tanh(r_mul_h + r_embed).unsqueeze(2)).squeeze(-1)   # (n_edge, 1)
         return {'att': att}
@@ -139,9 +149,9 @@ class KGAT(nn.Module):
         r_embed = self.relation_embed(r)                 # (kg_batch_size, relation_dim)
         W_r = self.W_R[r]                                # (kg_batch_size, entity_dim, relation_dim)
 
-        h_embed = self.entity_user_embed(h)              # (kg_batch_size, entity_dim)
-        pos_t_embed = self.entity_user_embed(pos_t)      # (kg_batch_size, entity_dim)
-        neg_t_embed = self.entity_user_embed(neg_t)      # (kg_batch_size, entity_dim)
+        h_embed = self.entity_embed(h)              # (kg_batch_size, entity_dim)
+        pos_t_embed = self.entity_embed(pos_t)      # (kg_batch_size, entity_dim)
+        neg_t_embed = self.entity_embed(neg_t)      # (kg_batch_size, entity_dim)
 
         r_mul_h = torch.bmm(h_embed.unsqueeze(1), W_r).squeeze(1)             # (kg_batch_size, relation_dim)
         r_mul_pos_t = torch.bmm(pos_t_embed.unsqueeze(1), W_r).squeeze(1)     # (kg_batch_size, relation_dim)
@@ -162,7 +172,7 @@ class KGAT(nn.Module):
 
     def cf_embedding(self, mode, g):
         g = g.local_var()
-        ego_embed = self.entity_user_embed(g.ndata['id'])
+        ego_embed = self.entity_embed(g.ndata['id'])
         all_embed = [ego_embed]
 
         for i, layer in enumerate(self.aggregator_layers):
@@ -175,28 +185,38 @@ class KGAT(nn.Module):
         return all_embed
 
 
-    def cf_score(self, mode, g, user_ids, item_ids):
+    def cf_score(self, mode, g, user_ids, item_ids,user_dict):
         """
         user_ids:   number of users to evaluate   (n_eval_users)
         item_ids:   number of items to evaluate   (n_eval_items)
         """
         all_embed = self.cf_embedding(mode, g)          # (n_users + n_entities, cf_concat_dim)
-        user_embed = all_embed[user_ids]                # (n_eval_users, cf_concat_dim)
+        #user_embed = all_embed[user_ids]                # (n_eval_users, cf_concat_dim)
+        user_embed = self.get_user_embed(all_embed, user_ids, user_dict)
         item_embed = all_embed[item_ids]                # (n_eval_items, cf_concat_dim)
 
         # Equation (12)
         cf_score = torch.matmul(user_embed, item_embed.transpose(0, 1))    # (n_eval_users, n_eval_items)
         return cf_score
 
+    def get_user_embed(self, embed, user_ids, user_dict):
+        item_list = list()
+        for uid in user_ids:
+            item_list.append(user_dict[uid.item()])
+        user_embed = self.encoder(embed[list(np.ravel(item_list))].view(len(user_ids), -1))
+        return user_embed
 
-    def calc_cf_loss(self, mode, g, user_ids, item_pos_ids, item_neg_ids):
+
+
+    def calc_cf_loss(self, mode, g, user_ids, item_pos_ids, item_neg_ids, user_dict):
         """
         user_ids:       (cf_batch_size)
         item_pos_ids:   (cf_batch_size)
         item_neg_ids:   (cf_batch_size)
         """
         all_embed = self.cf_embedding(mode, g)                      # (n_users + n_entities, cf_concat_dim)
-        user_embed = all_embed[user_ids]                            # (cf_batch_size, cf_concat_dim)
+        #user_embed = all_embed[user_ids]                            # (cf_batch_size, cf_concat_dim)
+        user_embed = self.get_user_embed(all_embed,user_ids,user_dict)
         item_pos_embed = all_embed[item_pos_ids]                    # (cf_batch_size, cf_concat_dim)
         item_neg_embed = all_embed[item_neg_ids]                    # (cf_batch_size, cf_concat_dim)
 
