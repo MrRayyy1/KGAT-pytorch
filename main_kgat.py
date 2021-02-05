@@ -258,19 +258,21 @@ def predict(args):
     #     model = nn.parallel.DistributedDataParallel(model)
 
     # move graph data to GPU
-    train_graph = data.kg_graph
+    train_graph = data.train_graph
     train_nodes = torch.LongTensor(train_graph.ndata['id'])
     train_edges = torch.LongTensor(train_graph.edata['type'])
     if use_cuda:
+        train_graph = train_graph.to(device)
         train_nodes = train_nodes.to(device)
         train_edges = train_edges.to(device)
     train_graph.ndata['id'] = train_nodes
     train_graph.edata['type'] = train_edges
 
-    test_graph = data.kg_graph
+    test_graph = data.test_graph
     test_nodes = torch.LongTensor(test_graph.ndata['id'])
     test_edges = torch.LongTensor(test_graph.edata['type'])
     if use_cuda:
+        test_graph = test_graph.to(device)
         test_nodes = test_nodes.to(device)
         test_edges = test_edges.to(device)
     test_graph.ndata['id'] = test_nodes
