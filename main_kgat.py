@@ -105,7 +105,7 @@ def train(args):
     optimizer = optim.Adam(model.parameters(), lr=args.lr)
 
     # move graph data to GPU
-    train_graph = data.kg_graph
+    train_graph = data.train_graph
     train_nodes = torch.LongTensor(train_graph.ndata['id'])
     train_edges = torch.LongTensor(train_graph.edata['type'])
     if use_cuda:
@@ -115,7 +115,7 @@ def train(args):
     train_graph.ndata['id'] = train_nodes
     train_graph.edata['type'] = train_edges
 
-    test_graph = data.kg_graph
+    test_graph = data.test_graph
     test_nodes = torch.LongTensor(test_graph.ndata['id'])
     test_edges = torch.LongTensor(test_graph.edata['type'])
     if use_cuda:

@@ -32,7 +32,9 @@ class DataLoaderKGAT(object):
         self.construct_data(kg_data)
 
         self.print_info(logging)
-        self.kg_graph = self.create_graph(self.kg_data, self.n_entities)
+        kg_graph = self.create_graph(self.kg_data, self.n_entities)
+        self.train_graph = kg_graph
+        self.test_graph = kg_graph
         #self.train_graph = self.create_graph(self.kg_train_data, self.n_users_entities)
         #self.test_graph = self.create_graph(self.kg_test_data, self.n_users_entities)
 
