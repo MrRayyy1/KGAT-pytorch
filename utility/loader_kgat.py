@@ -4,8 +4,13 @@ import collections
 
 import dgl
 import torch
-import numpy as np
 import pandas as pd
+import numpy as np
+import scipy.spatial
+import scipy.stats
+
+
+
 
 
 class DataLoaderKGAT(object):
@@ -24,10 +29,17 @@ class DataLoaderKGAT(object):
         test_file = os.path.join(data_dir, 'test.txt')
         kg_file = os.path.join(data_dir, "kg_final.txt")
 
-        self.cf_train_data, self.train_user_dict, self.train_user_all_dict = self.load_cf(train_file)
-        self.cf_test_data, self.test_user_dict, self.test_user_all_dict = self.load_cf(test_file)
+        self.cf_train_data, self.train_user_dict, self.train_item_dict, self.train_sim_user_dict, self.train_sim_item_dict = self.load_cf(train_file)
+        self.cf_test_data, self.test_user_dict, self.test_item_dict, self.test_sim_user_dict, self.test_sim_item_dict = self.load_cf(test_file)
         self.statistic_cf()
-
+        '''
+        train_sim = Similarity(self.n_users, self.n_items, self.train_user_dict)
+        test_sim = Similarity(self.n_users, self.n_items, self.test_user_dict)
+        self.train_user_sim = train_sim.sim_user_jaccard
+        self.train_item_sim = train_sim.sim_item_jaccard
+        self.test_user_sim = test_sim.sim_user_jaccard
+        self.test_item_sim = test_sim.sim_item_jaccard
+        '''
         kg_data = self.load_kg(kg_file)
         self.construct_data(kg_data)
 
@@ -47,7 +59,8 @@ class DataLoaderKGAT(object):
         item = []
         user_dict = dict()
         item_dict = dict()
-        user_all_dict = dict()
+        sim_user_dict = dict()
+        sim_item_dict = dict()
         lines = open(filename, 'r').readlines()
         for l in lines:
             tmp = l.strip()
@@ -68,25 +81,23 @@ class DataLoaderKGAT(object):
 
         for uid in user_dict.keys():
             user_sim_user = []
-            item_list = np.random.choice(list(user_dict[uid]), size=6, replace=True)
-            sim_item_list = list()
             for iid in user_dict[uid]:
                 user_sim_user = np.concatenate((user_sim_user, item_dict[iid]))
             user_sim_user = list(set(user_sim_user))
-            for sim_user in user_sim_user:
-                for sim_item in user_dict[sim_user]:
-                    if sim_item not in user_dict[uid]:
-                        sim_item_list.append(sim_item)
-            if sim_item_list:
-                sim_item_list = np.random.choice(list(set(sim_item_list)), size=2, replace=True)
-            else:
-                sim_item_list = np.random.choice(list(user_dict[uid]), size=2, replace=True)
-            sampled_item_list = np.concatenate((item_list, sim_item_list))
-            user_all_dict[uid] = sampled_item_list
+            user_sim_user.remove(uid)
+            sim_user_dict[uid] = np.ravel(user_sim_user)
+
+        for iid in item_dict.keys():
+            item_sim_item = []
+            for uid in item_dict[iid]:
+                item_sim_item = np.concatenate((item_sim_item, user_dict[uid]))
+            item_sim_item = list(set(item_sim_item))
+            item_sim_item.remove(iid)
+            sim_item_dict[iid] = np.ravel(item_sim_item)
+
         user = np.array(user, dtype=np.int32)
         item = np.array(item, dtype=np.int32)
-        return (user, item), user_dict, user_all_dict
-
+        return (user, item), user_dict, item_dict, sim_user_dict, sim_item_dict
 
     def statistic_cf(self):
         self.n_users = max(max(self.cf_train_data[0]), max(self.cf_test_data[0])) + 1
@@ -294,7 +305,40 @@ class DataLoaderKGAT(object):
         assert self.user_pre_embed.shape[1] == self.args.entity_dim
         assert self.item_pre_embed.shape[1] == self.args.entity_dim
 
+'''
+class Similarity:
+    def __init__(self, n_users, n_items, user_dict):
+        self.n_users = n_users
+        self.n_items = n_items
+        self.user_dict = user_dict
+        self.Mat = self.create_Mat()
+        self.sim_user_jaccard = self.cal_user_similarity()
+        self.sim_item_jaccard = self.cal_item_similarity()
+    def create_Mat(self):
+        Mat = np.zeros((self.n_users, self.n_items))
+        for user, items in self.user_dict.items():
+            for item in items:
+                Mat[user][item] = 1
+        return Mat
 
+    def cal_user_similarity(self):
+        print('calk sim user')
+        user_similarity_jaccard = np.zeros((self.n_users, self.n_users))
+        for user1 in range(self.n_users):
+            for user2 in range(self.n_users):
+                if np.count_nonzero(self.Mat[user1]) and np.count_nonzero(self.Mat[user2]):
+                    user_similarity_jaccard[user1][user2] = 1-scipy.spatial.distance.jaccard(self.Mat[user1],self.Mat[user2])
+        return user_similarity_jaccard
+
+    def cal_item_similarity(self):
+        print('calk sim item')
+        item_similarity_jaccard = np.zeros((self.n_items, self.n_items))
+        for item1 in range(self.n_items):
+            for item2 in range(self.n_items):
+                if np.count_nonzero(self.Mat[item1]) and np.count_nonzero(self.Mat[item2]):
+                    item_similarity_jaccard[item1][item2] = 1-scipy.spatial.distance.jaccard(self.Mat[item1],self.Mat[item2])
+        return item_similarity_jaccard
+'''
 
 
 
