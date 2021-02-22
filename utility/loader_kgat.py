@@ -82,7 +82,7 @@ class DataLoaderKGAT(object):
         for uid in user_dict.keys():
             user_sim_user = []
             for iid in user_dict[uid]:
-                user_sim_user = np.concatenate((user_sim_user, item_dict[iid]))
+                user_sim_user = np.concatenate((user_sim_user, item_dict[iid])).astype(int)
             user_sim_user = list(set(user_sim_user))
             user_sim_user.remove(uid)
             sim_user_dict[uid] = np.ravel(user_sim_user)
@@ -90,7 +90,7 @@ class DataLoaderKGAT(object):
         for iid in item_dict.keys():
             item_sim_item = []
             for uid in item_dict[iid]:
-                item_sim_item = np.concatenate((item_sim_item, user_dict[uid]))
+                item_sim_item = np.concatenate((item_sim_item, user_dict[uid])).astype(int)
             item_sim_item = list(set(item_sim_item))
             item_sim_item.remove(iid)
             sim_item_dict[iid] = np.ravel(item_sim_item)
