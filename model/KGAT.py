@@ -195,16 +195,16 @@ class KGAT(nn.Module):
         return all_embed
 
 
-    def cf_score(self, mode, g, user_ids, item_ids,user_dict, sim_user_dict, sim_item_dict, item_dict):
+    def cf_score(self, mode, g, user_ids, item_ids,user_dict, sim_user_dict, item_dict, sim_item_dict, user_sim, item_sim):
         """
         user_ids:   number of users to evaluate   (n_eval_users)
         item_ids:   number of items to evaluate   (n_eval_items)
         """
         all_embed = self.cf_embedding(mode, g)          # (n_users + n_entities, cf_concat_dim)
         #user_embed = all_embed[user_ids]                # (n_eval_users, cf_concat_dim)
-        user_embed = self.get_user_embed(all_embed, user_ids, user_dict, sim_user_dict)
+        user_embed = self.get_user_embed(all_embed, user_ids, user_dict, sim_user_dict, user_sim)
         #item_embed = all_embed[item_ids]                # (n_eval_items, cf_concat_dim)
-        item_embed = self.get_item_embed(all_embed, item_ids, sim_item_dict, item_dict)
+        item_embed = self.get_item_embed(all_embed, item_ids, sim_item_dict, item_dict, item_sim)
         # Equation (12)
         cf_score = torch.matmul(user_embed, item_embed.transpose(0, 1))    # (n_eval_users, n_eval_items)
         return cf_score
@@ -225,13 +225,14 @@ class KGAT(nn.Module):
             kg_user_embed = kg_user_embed.view(len(user_ids), -1)
         return kg_user_embed
 
-    def get_user_cf_embed(self, embed, user_ids, user_dict, sim_user_dict):
+    def get_user_cf_embed(self, embed, user_ids, user_dict, sim_user_dict, user_sim):
         cf_user_embed = None
         for uid in user_ids:
             sim_user_embed = 0
             norm = 0
             for sim_user in sim_user_dict[uid.item()]:
-                sim = self.calk_sim(uid.item(), sim_user, user_dict)
+                #sim = self.calk_sim(uid.item(), sim_user, user_dict)
+                sim = user_sim[uid][sim_user]
                 sim_user_embed += sim * self.get_user_kg_embed(embed, sim_user, user_dict)
                 norm += sim
             sim_user_embed_final = sim_user_embed / norm
@@ -241,21 +242,22 @@ class KGAT(nn.Module):
                 cf_user_embed = torch.cat((cf_user_embed, sim_user_embed_final), dim=0)
         return cf_user_embed.view(len(user_ids), -1)
 
-    def get_user_embed(self, embed, user_ids, user_dict, sim_user_dict):
+    def get_user_embed(self, embed, user_ids, user_dict, sim_user_dict, user_sim):
         kg_embed = self.get_user_kg_embed(embed, user_ids, user_dict)
-        cf_embed = self.get_user_cf_embed(embed, user_ids, user_dict, sim_user_dict)
+        cf_embed = self.get_user_cf_embed(embed, user_ids, user_dict, sim_user_dict, user_sim)
         final_embed = torch.cat((kg_embed, cf_embed), dim=-1)
         user_embed = self.user_encoder(final_embed)
         return user_embed
 
-    def get_item_embed(self,all_embed, item_ids, sim_item_dict, item_dict):
+    def get_item_embed(self,all_embed, item_ids, sim_item_dict, item_dict, item_sim):
         item_kg_embed = all_embed[item_ids]
         cf_item_embed = None
         for iid in item_ids:
             sim_item_embed = 0
             norm = 0
             for sim_item in sim_item_dict[iid.item()]:
-                sim = self.calk_sim(iid.item(), sim_item, item_dict)
+                #sim = self.calk_sim(iid.item(), sim_item, item_dict)
+                sim = item_sim[iid][sim_item]
                 sim_item_embed +=  sim * all_embed[sim_item.astype(int)]
                 norm += sim
             sim_item_embed_final = sim_item_embed / norm
@@ -267,7 +269,7 @@ class KGAT(nn.Module):
         item_embed_final = torch.cat((item_kg_embed, cf_item_embed), dim=-1)
         item_embed = self.item_encoder(item_embed_final)
         return item_embed
-
+    '''
     def calk_sim(self,idx, sim_idx, i_dict):
         staffs = i_dict[idx]
         staffs2 = i_dict[sim_idx]
@@ -275,9 +277,9 @@ class KGAT(nn.Module):
         inter = len(list(set(staffs).intersection(set(staffs2))))
         sim = inter/all
         return sim
+    '''
 
-
-    def calc_cf_loss(self, mode, g, user_ids, item_pos_ids, item_neg_ids, user_dict, sim_user_dict, item_dict, sim_item_dict):
+    def calc_cf_loss(self, mode, g, user_ids, item_pos_ids, item_neg_ids, user_dict, sim_user_dict, item_dict, sim_item_dict, user_sim, item_sim):
         """
         user_ids:       (cf_batch_size)
         item_pos_ids:   (cf_batch_size)
@@ -285,11 +287,11 @@ class KGAT(nn.Module):
         """
         all_embed = self.cf_embedding(mode, g)                      # (n_users + n_entities, cf_concat_dim)
         #user_embed = all_embed[user_ids]                            # (cf_batch_size, cf_concat_dim)
-        user_embed = self.get_user_embed(all_embed, user_ids, user_dict, sim_user_dict)
+        user_embed = self.get_user_embed(all_embed, user_ids, user_dict, sim_user_dict, user_sim)
         #item_pos_embed = all_embed[item_pos_ids]                    # (cf_batch_size, cf_concat_dim)
         #item_neg_embed = all_embed[item_neg_ids]                    # (cf_batch_size, cf_concat_dim)
-        item_pos_embed = self.get_item_embed(all_embed, item_pos_ids, sim_item_dict, item_dict)
-        item_neg_embed = self.get_item_embed(all_embed, item_neg_ids, sim_item_dict, item_dict)
+        item_pos_embed = self.get_item_embed(all_embed, item_pos_ids, sim_item_dict, item_dict, item_sim)
+        item_neg_embed = self.get_item_embed(all_embed, item_neg_ids, sim_item_dict, item_dict, item_sim)
         # Equation (12)
         pos_score = torch.sum(user_embed * item_pos_embed, dim=1)   # (cf_batch_size)
         neg_score = torch.sum(user_embed * item_neg_embed, dim=1)   # (cf_batch_size)

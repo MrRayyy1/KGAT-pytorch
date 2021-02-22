@@ -21,7 +21,7 @@ from utility.helper import *
 from utility.loader_kgat import DataLoaderKGAT
 
 
-def evaluate(model, train_graph, train_user_dict, test_user_dict, user_ids_batches, item_ids, K, test_user_sim_dict, test_item_dict, test_item_sim_dict):
+def evaluate(model, train_graph, train_user_dict, test_user_dict, user_ids_batches, item_ids, K, test_user_sim_dict, test_item_dict, test_item_sim_dict, test_sim_user, test_sim_item):
     model.eval()
 
     with torch.no_grad():
@@ -38,7 +38,7 @@ def evaluate(model, train_graph, train_user_dict, test_user_dict, user_ids_batch
 
     with torch.no_grad():
         for user_ids_batch in user_ids_batches:
-            cf_scores_batch = model('predict', train_graph, user_ids_batch, item_ids, test_user_dict, test_user_sim_dict, test_item_dict, test_item_sim_dict)       # (n_batch_users, n_eval_items)
+            cf_scores_batch = model('predict', train_graph, user_ids_batch, item_ids, test_user_dict, test_user_sim_dict, test_item_dict, test_item_sim_dict, test_sim_user, test_sim_item)       # (n_batch_users, n_eval_items)
 
             cf_scores_batch = cf_scores_batch.cpu()
             user_ids_batch = user_ids_batch.cpu().numpy()
@@ -155,7 +155,7 @@ def train(args):
                 cf_batch_user = cf_batch_user.to(device)
                 cf_batch_pos_item = cf_batch_pos_item.to(device)
                 cf_batch_neg_item = cf_batch_neg_item.to(device)
-            cf_batch_loss = model('calc_cf_loss', train_graph, cf_batch_user, cf_batch_pos_item, cf_batch_neg_item, data.train_user_dict, data.train_sim_user_dict, data.train_item_dict, data.train_sim_item_dict)
+            cf_batch_loss = model('calc_cf_loss', train_graph, cf_batch_user, cf_batch_pos_item, cf_batch_neg_item, data.train_user_dict, data.train_sim_user_dict, data.train_item_dict, data.train_sim_item_dict, data.train_user_sim, data.train_item_sim)
 
             cf_batch_loss.backward()
             optimizer.step()
@@ -195,7 +195,7 @@ def train(args):
         # evaluate cf
         if (epoch % args.evaluate_every) == 0:
             time1 = time()
-            _, precision, recall, ndcg = evaluate(model, train_graph, data.train_user_dict, data.test_user_dict, user_ids_batches, item_ids, args.K, data.test_sim_user_dict, data.test_item_dict, data.test_sim_item_dict)
+            _, precision, recall, ndcg = evaluate(model, train_graph, data.train_user_dict, data.test_user_dict, user_ids_batches, item_ids, args.K, data.test_sim_user_dict, data.test_item_dict, data.test_sim_item_dict, data.test_user_sim, data.test_item_sim)
             logging.info('CF Evaluation: Epoch {:04d} | Total Time {:.1f}s | Precision {:.4f} Recall {:.4f} NDCG {:.4f}'.format(epoch, time() - time1, precision, recall, ndcg))
 
             epoch_list.append(epoch)
@@ -216,7 +216,7 @@ def train(args):
     save_model(model, args.save_dir, epoch)
 
     # save metrics
-    _, precision, recall, ndcg = evaluate(model, train_graph, data.train_user_dict, data.test_user_dict, user_ids_batches, item_ids, args.K)
+    _, precision, recall, ndcg = evaluate(model, train_graph, data.train_user_dict, data.test_user_dict, user_ids_batches, item_ids, args.K, data.test_sim_user_dict, data.test_item_dict, data.test_sim_item_dict, data.test_user_sim, data.test_item_sim)
     logging.info('Final CF Evaluation: Precision {:.4f} Recall {:.4f} NDCG {:.4f}'.format(precision, recall, ndcg))
 
     epoch_list.append(epoch)
@@ -279,7 +279,7 @@ def predict(args):
     test_graph.edata['type'] = test_edges
 
     # predict
-    cf_scores, precision, recall, ndcg = evaluate(model, train_graph, data.train_user_dict, data.test_user_dict, user_ids_batches, item_ids, args.K, data.test_sim_user_dict, data.test_item_dict, data.test_sim_item_dict)
+    cf_scores, precision, recall, ndcg = evaluate(model, train_graph, data.train_user_dict, data.test_user_dict, user_ids_batches, item_ids, args.K, data.test_sim_user_dict, data.test_item_dict, data.test_sim_item_dict, data.test_user_sim, data.test_item_sim)
     np.save(args.save_dir + 'cf_scores.npy', cf_scores)
     print('CF Evaluation: Precision {:.4f} Recall {:.4f} NDCG {:.4f}'.format(precision, recall, ndcg))
 

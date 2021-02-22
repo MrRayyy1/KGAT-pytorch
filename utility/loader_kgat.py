@@ -32,14 +32,14 @@ class DataLoaderKGAT(object):
         self.cf_train_data, self.train_user_dict, self.train_item_dict, self.train_sim_user_dict, self.train_sim_item_dict = self.load_cf(train_file)
         self.cf_test_data, self.test_user_dict, self.test_item_dict, self.test_sim_user_dict, self.test_sim_item_dict = self.load_cf(test_file)
         self.statistic_cf()
-        '''
+
         train_sim = Similarity(self.n_users, self.n_items, self.train_user_dict)
         test_sim = Similarity(self.n_users, self.n_items, self.test_user_dict)
         self.train_user_sim = train_sim.sim_user_jaccard
         self.train_item_sim = train_sim.sim_item_jaccard
         self.test_user_sim = test_sim.sim_user_jaccard
         self.test_item_sim = test_sim.sim_item_jaccard
-        '''
+
         kg_data = self.load_kg(kg_file)
         self.construct_data(kg_data)
 
@@ -305,7 +305,7 @@ class DataLoaderKGAT(object):
         assert self.user_pre_embed.shape[1] == self.args.entity_dim
         assert self.item_pre_embed.shape[1] == self.args.entity_dim
 
-'''
+
 class Similarity:
     def __init__(self, n_users, n_items, user_dict):
         self.n_users = n_users
@@ -338,7 +338,7 @@ class Similarity:
                 if np.count_nonzero(self.Mat[item1]) and np.count_nonzero(self.Mat[item2]):
                     item_similarity_jaccard[item1][item2] = 1-scipy.spatial.distance.jaccard(self.Mat[item1],self.Mat[item2])
         return item_similarity_jaccard
-'''
+
 
 
 
